@@ -1,0 +1,9 @@
+df <- merge(x=Karius_metadata, y=SIngle_pathogen_analysis, by.x=c("patient_ir_id", "bal_dt"), by.y=c("patient_ir_id", "bal_collection_date"))
+PA <- subset(df, Culture_pathogen == "PA")
+PA_barplot <- ggplot(PA) + geom_bar(aes(x = Subject_ID, y = log(RPMH), fill = Reportable_Name), position = "dodge", stat = "identity") + facet_wrap(~cured, scales="free")
+
+MRSA <- subset(df, Culture_pathogen == "MRSA")
+MRSA_barplot <- ggplot(MRSA) + geom_bar(aes(x = Subject_ID, y = log(RPMH), fill = Reportable_Name), position = "dodge", stat = "identity") + facet_wrap(~cured, scales="free")
+
+MSSA <- subset(df, Culture_pathogen == "MSSA")
+MSSA_barplot <- ggplot(MSSA) + geom_bar(aes(x = Subject_ID, y = log(RPMH), fill = Reportable_Name), position = "dodge", stat = "identity") + facet_wrap(~cured, scales="free")
