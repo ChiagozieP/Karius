@@ -1,4 +1,70 @@
-df <- merge(x=Karius_metadata, y=SIngle_pathogen_analysis, by.x=c("patient_ir_id", "bal_dt"), by.y=c("patient_ir_id", "bal_collection_date"))
+
+library(dplyr)
+library(stats)
+library(RColorBrewer)
+library(ggplot2)
+library(viridis)
+library(hrbrthemes)
+library(tidyverse)
+library(ggpubr)
+library(lubridate)
+library(tibble)
+library(modelsummary)
+library(reshape)
+library(tidyr)
+library(patchwork)
+library(fabricatr)
+library(mice)
+library(visdat)
+library(dplyr)
+library(ggalluvial)
+
+#Merging Karius Data with CDdataset
+Karius_metadata <- merge(x=KAR0026_combined, y=CD_dataset_112024, by.x="Subject_ID", by.y="bal_barcode")
+Karius_metadata <- Karius_metadata %>% mutate(Karius_positive = case_when(Reportable_Name == 'N/A' ~ "No"))
+Karius_metadata <- Karius_metadata %>% mutate(Karius_positive = ifelse(is.na(Karius_positive), 0, Karius_positive))
+Karius_metadata$Karius_positive[Karius_metadata$Karius_positive=="0"] <- "Yes"
+Karius_metadata <- Karius_metadata %>% mutate(PMN_group = case_when(bal_pct_neutro <= 50 ~ "Less Than 50%", bal_pct_neutro > 50 ~ "Above 50%"))
+Karius_metadata$RPMH <- as.numeric(Karius_metadata$RPMH)
+Karius_metadata$Sample_ID <- as.character(Karius_metadata$Sample_ID)
+
+Karius_metadata$unfavorable_outcome[Karius_metadata$unfavorable_outcome=="1"] <- "Died"
+Karius_metadata$unfavorable_outcome[Karius_metadata$unfavorable_outcome=="0"] <- "Alive"
+Karius_metadata$Pathogen_Category[Karius_metadata$Pathogen_Category=="N/A"] <-"No Organism Identified"
+Karius_metadata$Reportable_Name[Karius_metadata$Reportable_Name=="N/A"] <-"No Organism Identified"
+
+#Stacked Barplot of Karius Samples in Culture Negative Cases
+ggplot(Micronegative, aes(fill=Reportable_Name, y=log(RPMH), x=Sample_ID)) + geom_bar(position="stack", stat="identity") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#Proportions Barplot of PMNs and Pathogen Category in Micronegative Cases
+Micronegative <- subset(Karius_metadata, episode_etiology == 'Microbiology-negative')
+Micronegative <- subset(Micronegative, !is.na(bal_pct_neutro))
+p <- ggplot(Micronegative, aes(x =PMN_group, fill =Pathogen_Category)) + geom_bar(stat = 'count', position = 'fill')
+p2 <- p + scale_fill_viridis_d() + theme_bw() + labs(title= "Microbiology Negative BALs", x = "BAL Percent Neutrophils", y = "Proportion of Samples") + theme(plot.title = element_text(size=14, face="bold", hjust=0.5), axis.text.x = element_text(size=14), strip.text.x = element_text(size = 14), legend.position = "bottom", legend.text = element_text(size=14), axis.title=element_text(size=14), legend.title = element_text(size=14))
+
+plot_base <- ggplot(data=Micronegative, mapping=aes(x=Reportable_Name, y=log(RPMH))) + theme_bw() + geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+plot_base <- ggplot(data=Micronegative, mapping=aes(x=Reportable_Name, y=log(RPMH), fill=PMN_group)) + theme_bw() + geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip() + facet_wrap(~cured, scales="free")
+
+Micronegative <- subset(Micronegative, Reportable_Name != 'N/A')
+Micronegative <- subset(Micronegative, RPMH > 0)
+
+Micronegative %>% group_by(cured, PMN_group, Reportable_Name) %>% summarise(abundance = mean(log(RPMH))) %>% ggplot() + labs(title = "Microbiology Negative Samples", x = "Mean log(RPMH)", y = "Organism Name") + scale_fill_viridis_d() + geom_bar(aes(x = abundance, y = reorder_within(Reportable_Name, abundance, cured), fill=PMN_group), stat = "identity", show.legend = TRUE) + facet_wrap(~cured, scales="free_y") + scale_y_reordered() + theme_minimal() + theme(plot.title = element_text(size=14, face="bold", hjust=0.5), axis.text.x = element_text(size=14), strip.text.x = element_text(size = 14), axis.text.y = element_text(size=10), legend.position = "bottom", legend.text = element_text(size=14), axis.title=element_text(size=14), legend.title = element_text(size=14))
+
+#Alluvial Plots
+Karius_metadata$Pathogen_Category[Karius_metadata$Pathogen_Category=="category1"] <- "Category 1"
+Karius_metadata$Pathogen_Category[Karius_metadata$Pathogen_Category=="category2"] <- "Category 2"
+Karius_metadata$Pathogen_Category[Karius_metadata$Pathogen_Category=="category3"] <- "Category 3"
+
+Alluvial <- culture_negative %>% select(Karius_positive, Pathogen_Category, PMN_group, unfavorable_outcome)
+Alluvial <- na.omit(Alluvial)
+names(Alluvial)[names(Alluvial) == "Pathogen_Category"] <- "Pathogen Category"
+names(Alluvial)[names(Alluvial) == "Karius_positive"] <- "Karius Positive"
+names(Alluvial)[names(Alluvial) == "unfavorable_outcome"] <- "Discharge Disposition"
+
+ggplot(Alluvial, aes(axis1=PMN_group, axis2=Karius_positive, axis3=Pathogen_Category, axis4=unfavorable_outcome)) + scale_x_discrete(limits = c("PMN_group", "Karius_positive", "Pathogen_Category", "unfavorable_outcome"), expand = c(.01, .05)) + ylab("") + scale_fill_brewer(palette = "Accent") + geom_alluvium(aes(fill =PMN_group), na.rm = TRUE, cement.alluvia = TRUE) + geom_stratum() + geom_text(stat = "stratum", aes(label = after_stat(stratum))) + theme_minimal() + ggtitle("Micro-Negative Samples") + theme(legend.position = "none", panel.grid.major = element_blank(), plot.title = element_text(hjust = 0.5), panel.grid.minor = element_blank(), axis.text.y = element_blank(), axis.text.x = element_text(size = 12, face = "bold"))
+
+#Single Pathogen Analysis
+df <- merge(x=Karius_metadata, y=Single_pathogen_analysis, by.x=c("patient_ir_id", "bal_dt"), by.y=c("patient_ir_id", "bal_collection_date"))
 PA <- subset(df, Culture_pathogen == "PA")
 PA_barplot <- ggplot(PA) + geom_bar(aes(x = Subject_ID, y = log(RPMH), fill = Reportable_Name), position = "dodge", stat = "identity") + facet_wrap(~cured, scales="free")
 
@@ -7,3 +73,18 @@ MRSA_barplot <- ggplot(MRSA) + geom_bar(aes(x = Subject_ID, y = log(RPMH), fill 
 
 MSSA <- subset(df, Culture_pathogen == "MSSA")
 MSSA_barplot <- ggplot(MSSA) + geom_bar(aes(x = Subject_ID, y = log(RPMH), fill = Reportable_Name), position = "dodge", stat = "identity") + facet_wrap(~cured, scales="free")
+
+#Amylase Trends
+df_amylase <- merge(x=Karius_metadata, y=human_microbe_ratios, by.x="Subject_ID", by.y="bal_barcode")
+
+#Microbial to Human Ratio for Karius Compared to Amylase
+a <- ggplot(df_amylase, aes(x=log(amylase), y=log(ratio)))
+a <- a + geom_point(size=4) + geom_smooth(method = "loess") + stat_cor(method = "pearson", label.x = 3, label.y = 12, size=6) + xlab("Log(BAL Amylase)") + ylab("Ratio on Log Scale") + theme_bw() + theme_bw() + theme(axis.title.x = element_text(size=12), axis.title.y = element_text(size=12), legend.position='none')
+
+#Total Microbial MPM Compared to Amylase
+b <- ggplot(df_amylase, aes(x=log(amylase), y=log(total_microbial_mpm)))
+b <- b + geom_point(size=4) + geom_smooth(method = "loess") + stat_cor(method = "pearson", label.x = 3, label.y = 20, size=6) + xlab("Log(BAL Amylase)") + ylab("Total Microbial MPM on Log Scale") + theme_bw() + theme_bw() + theme(axis.title.x = element_text(size=12), axis.title.y = element_text(size=12), legend.position='none')
+
+#Micronegative and Bacterial Load
+Micronegative2 <- subset(df_amylase, episode_etiology == "Microbiology-negative")
+e <- ggplot(Micronegative2, aes(x=cured, y=log(ratio))) + geom_boxplot(aes(fill=cured)) + scale_fill_viridis_d()
