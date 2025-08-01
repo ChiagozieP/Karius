@@ -1,0 +1,228 @@
+---
+title: "Karius"
+output: html_document
+date: "2025-07-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(FactoMineR)
+library(factoextra)
+library(dplyr)
+library(ggplot2)
+library(Hmisc)
+library(mice, warn.conflicts = FALSE)
+library(VIM)
+library(RColorBrewer)
+library(viridis)
+library(hrbrthemes)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(naniar)
+library(reshape2)
+library(readxl)
+library(gtsummary)
+
+CDdataset <- read_excel("C:/Users/cononye/Desktop/RStudio/Amylase/CDdataset.xlsx")
+Basic_endpoints052825 <- read_excel("C:/Users/cononye/Desktop/RStudio/Amylase/Basic_endpoints052825.xlsx")
+Karius_data_072025 <- read_excel("~/Karius/Karius_data_072025.xlsx")
+
+#Find samples that passed quality control check
+Pass <- subset(Karius_data_072025, QC == "Pass")
+
+#Find the first BAL
+First_BAL <- Pass[grep("BAL-00", Pass$Subject_ID), ]
+
+#Category 1 patients
+Cat1 <- subset(First_BAL, Pathogen_category == "category1")
+
+#Category 2 patients
+Cat2 <- subset(First_BAL, Pathogen_category == "category2")
+
+#Category 3 or NA patients
+Cat3orNA <- subset(First_BAL, Pathogen_category == "category3" | Pathogen_category == "N/A")
+
+#To find patients that are only category 3, remove the patients from category 2 and category 1
+Cat3orNA <- Cat3orNA %>% filter(!Cat3orNA$Subject_ID %in% Cat1$Subject_ID)
+Cat3orNA <- Cat3orNA %>% filter(!Cat3orNA$Subject_ID %in% Cat2$Subject_ID)
+
+#Merge Cat1 with Cat3orNA to compare Category 1 to Category 3 or NA outcomes
+Cat1_3_NA <- rbind(Cat1, Cat3orNA)
+
+#Merge Karius data with metadata based on bal_barcode
+Merged_df = merge(Cat1_3_NA, CDdataset, by.x=c("Subject_ID"), by.y=c("bal_barcode"))
+
+#Remove duplicate patient IDs, note that BALs that had nothing identified by Karius are N/A in the pathogen identified category
+Merged_df_uniqueID <- Merged_df[!duplicated(Merged_df$pt_study_id),]
+
+#Add mortality column
+Merged_df_uniqueID <- Merged_df_uniqueID %>% mutate(Mortality = case_when(discharge_disposition_name == 'Died' ~ "Died"))
+Merged_df_uniqueID <- Merged_df_uniqueID %>% mutate(Mortality = ifelse(is.na(Mortality), "Alive", Mortality))
+
+#Combine pathogen_category 1 and 2 into new columns
+Merged_df_uniqueID <- Merged_df_uniqueID %>% mutate(Pathogen = case_when(Pathogen_category == 'category1' ~ "Category 1 Pathogen"))
+Merged_df_uniqueID <- Merged_df_uniqueID %>% mutate(Pathogen = ifelse(is.na(Pathogen), "Category 3 or NA", Pathogen))
+
+
+#Ensure labelling in new columns is correct
+table(Merged_df_uniqueID$discharge_disposition_name, Merged_df_uniqueID$Mortality)
+table(Merged_df_uniqueID$Pathogen, Merged_df_uniqueID$Pathogen_category)
+
+#Summary data for Mortality
+table(Merged_df_uniqueID$Mortality, Merged_df_uniqueID$Pathogen)
+Mortality <- data.frame("Cat1" = c(16, 17), "Cat 3 or No Organism" = c(46, 33), row.names = c("Deceased", "Alive"), stringsAsFactors = FALSE)
+colnames(Mortality) <- c("Cat1", "Cat 3 or No Organism")
+fisher.test(Mortality)
+
+summary(total_icu_los_days ~ Pathogen, data=Merged_df_uniqueID)
+summary(hospital_los_days ~ Pathogen, data=Merged_df_uniqueID)
+
+kruskal.test(total_icu_los_days ~ Pathogen, data=Merged_df_uniqueID)
+kruskal.test(hospital_los_days ~ Pathogen, data=Merged_df_uniqueID)
+
+Micronegative <- subset(Merged_df_uniqueID, episode_etiology == "Microbiology-negative")
+
+summary(total_icu_los_days ~ Pathogen, data=Micronegative)
+summary(hospital_los_days ~ Pathogen, data=Micronegative)
+
+kruskal.test(total_icu_los_days ~ Pathogen, data=Micronegative)
+kruskal.test(hospital_los_days ~ Pathogen, data=Micronegative)
+
+NPC <- subset(Merged_df_uniqueID, episode_category == "NPC")
+
+summary(total_icu_los_days ~ Pathogen, data=NPC)
+summary(hospital_los_days ~ Pathogen, data=NPC)
+
+kruskal.test(total_icu_los_days ~ Pathogen, data=NPC)
+kruskal.test(hospital_los_days ~ Pathogen, data=NPC)
+
+table(NPC$Mortality, NPC$Pathogen)
+Mortality <- data.frame("Cat1" = c(6,8), "Cat 3 or No Organism" = c(18,7), row.names = c("Deceased", "Alive"), stringsAsFactors = FALSE)
+colnames(Mortality) <- c("Cat1", "Cat 3 or No Organism")
+fisher.test(Mortality)
+
+```
+
+## Looking at cases where Karius identified a category 1 that SOC didnt
+
+```{r}
+CDdataset <- read_excel("C:/Users/cononye/Desktop/RStudio/Amylase/CDdataset.xlsx")
+Basic_endpoints052825 <- read_excel("C:/Users/cononye/Desktop/RStudio/Amylase/Basic_endpoints052825.xlsx")
+Karius_data_072025 <- read_excel("~/Karius/Karius_data_072025.xlsx")
+
+#Find samples that passed quality control check
+Pass <- subset(Karius_data_072025, QC == "Pass")
+
+#Find samples that mcfDNA found category 1 but SOC didnt
+Karius_pos_cat1 <- Karius_data_072025[Karius_data_072025$Subject_ID %in% c("1344-BAL-05", "1344-BAL-07", "1362-BAL-00", "1387-BAL-06", "1515-BAL-09", "1515-BAL-19", "1518-BAL-21", "1518-BAL-42", "1518-BAL-53", "1529-BAL-00", "1529-BAL-04", "1542-BAL-00", "1585-BAL-08", "1596-BAL-00", "1673-BAL-00", "1694-BAL-00", "1707-BAL-00"),]
+Karius_pos_cat1$Result_agreement <- c("Only Karius Positive Category 1")
+Merged_df = merge(Karius_pos_cat1, CDdataset, by.x=c("Subject_ID"), by.y=c("bal_barcode"))
+Merged_df_uniqueID <- Merged_df[!duplicated(Merged_df$pt_study_id),]
+
+Other <- Karius_data_072025[!Karius_data_072025$Subject_ID %in% c(Karius_pos_cat1$Subject_ID),]
+Other$Result_agreement <- c("SOC and Karius Concordant for Category 1")
+Merged_df2 = merge(Other, CDdataset, by.x=c("Subject_ID"), by.y=c("bal_barcode"))
+Merged_df_uniqueID2 <- Merged_df2[!duplicated(Merged_df2$pt_study_id),]
+
+#Ensure the patients where only mcfDNA found Category 1 are not in the 'Other' list
+df <- Merged_df_uniqueID2[!Merged_df_uniqueID2$pt_study_id %in% c(Merged_df_uniqueID$pt_study_id),]
+
+#Merged patients with mcfDNA positive for Cat1 with the rest
+new_df <- rbind(df, Merged_df_uniqueID)
+new_df <- new_df %>% mutate(Mortality = case_when(discharge_disposition_name == 'Died' ~ "Died"))
+new_df <- new_df %>% mutate(Mortality = ifelse(is.na(Mortality), "Alive", Mortality))
+
+new_df <- new_df %>% mutate(discharge_group = case_when(
+        discharge_disposition_name == "Died" ~ "Death, Hospice, or LTACH",
+        discharge_disposition_name == "Hospice" ~ "Death, Hospice, or LTACH",
+        discharge_disposition_name == "LTACH" ~ "Death, Hospice, or LTACH",
+        discharge_disposition_name == "Home" ~ "Home, Rehab or SNF",
+        discharge_disposition_name == "Rehab" ~ "Home, Rehab or SNF",
+        discharge_disposition_name == "SNF" ~ "Home, Rehab or SNF"))
+
+#Fisher Exact Test
+Mortality_df <- data.frame("Only mcfDNA Cat 1 Positive" = c(4, 8), "No Category 1 Discordance" = c(144, 119), row.names = c("Alive", "Deceased"), stringsAsFactors = FALSE)
+colnames(Mortality_df) <- c("Only mcfDNA Cat 1 Positive", "No Category 1 Discordance")
+Mortality_df
+
+mosaicplot(Mortality_df, main = "Mosaic plot", color = TRUE)
+fisher.test(Mortality_df)
+
+tapply(new_df$total_icu_los_days, new_df$Result_agreement, summary)
+tapply(new_df$hospital_los_days, new_df$Result_agreement, summary)
+kruskal.test(total_icu_los_days ~ Result_agreement, data=new_df)
+kruskal.test(hospital_los_days ~ Result_agreement, data=new_df)
+
+hosp_los <- ggplot(data = new_df, aes(x=Result_agreement, y=hospital_los_days)) + geom_boxplot(aes(fill=Result_agreement)) + scale_fill_brewer(palette="Set1") + labs(x="mcfDNA Identification of a Category 1 Microbe", y="Hospital Length of Stay (Days)") + theme_bw() + theme(axis.text.x = element_text(size=12, face="bold"), axis.title.x = element_text(size=14, face="bold"), axis.title.y =element_text(size=12), axis.text.y = element_text(size=14), legend.position ="none")
+p <- hosp_los + geom_signif(comparisons=list(c("Only Karius Positive Category 1", "SOC and Karius Concordant for Category 1")), map_signif_level = FALSE, tip_length = 0, y_position = 200, textsize = 5)
+
+icu_los <- ggplot(data = new_df, aes(x=Result_agreement, y=total_icu_los_days)) + geom_boxplot(aes(fill=Result_agreement)) + scale_fill_brewer(palette="Set1") + labs(x="mcfDNA Identification of a Category 1 Microbe", y="Total ICU Length of Stay (Days)") + theme_bw() + theme(axis.text.x = element_text(size=12, face="bold"), axis.title.x = element_text(size=14, face="bold"), axis.title.y =element_text(size=12), axis.text.y = element_text(size=14), legend.position ="none")
+p1 <- icu_los + geom_signif(comparisons=list(c("Only Karius Positive Category 1", "SOC and Karius Concordant for Category 1")), map_signif_level = FALSE, tip_length = 0, y_position = 50, textsize = 5)
+
+p2 <- ggplot(new_df_no_outliers, aes(x=Result_agreement, fill=discharge_disposition_name)) + geom_bar(stat = 'count', position = 'fill')
+p2 <- p2 + scale_fill_viridis_d() + theme_bw() + labs(fill= "Discharge Disposition Name", x="", y="Percentage", title="Discharge Disposition Name") + theme(axis.text.x=element_text(size=14), axis.title.y=element_text(size=14), legend.position = "bottom", legend.text = element_text(size=14), legend.title = element_text(size=14), plot.title=element_text(hjust=0.5)) 
+p2
+
+p3 <- ggplot(new_df, aes(x=Result_agreement, fill=discharge_group)) + geom_bar(stat = 'count', position = 'fill')
+p3 <- p3 + scale_fill_viridis_d() + theme_bw() + labs(fill= "Discharge Disposition", x="", y="Percentage", title="Discharge Disposition") + theme(axis.text.x=element_text(size=14), axis.title.y=element_text(size=14), legend.position = "bottom", legend.text = element_text(size=14), legend.title = element_text(size=14), plot.title=element_text(hjust=0.5)) 
+p3
+
+
+ggarrange(p, p1, p2, p3, nrow=2, ncol=2)
+
+```
+
+##Removing Outliers
+
+```{r}
+#Remove outliers for Concordant subset
+Concordant <- subset(new_df, Result_agreement == "SOC and Karius Concordant for Category 1")
+Q1 <- quantile(Concordant$hospital_los_days, 0.25)
+Q3 <- quantile(Concordant$hospital_los_days, 0.75)
+IQR <- Q3 - Q1
+
+# Define outlier bounds
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Remove outliers
+Concordant_no_outliers <- subset(Concordant, hospital_los_days >= lower_bound & hospital_los_days <= upper_bound)
+
+#Remove outliers for Karius_positive subset
+Karius_pos <- subset(new_df, Result_agreement == "Only Karius Positive Category 1")
+Q1 <- quantile(Karius_pos$hospital_los_days, 0.25)
+Q3 <- quantile(Karius_pos$hospital_los_days, 0.75)
+IQR <- Q3 - Q1
+
+# Define outlier bounds
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Remove Outliers
+Karius_no_outliers <- subset(Karius_pos, hospital_los_days >= lower_bound & hospital_los_days <= upper_bound)
+
+#Combine datasets and re-run boxplots
+new_df_no_outliers <- rbind(Karius_no_outliers, Concordant_no_outliers)
+
+hosp_los <- ggplot(data = new_df_no_outliers, aes(x=Result_agreement, y=hospital_los_days)) + geom_boxplot(aes(fill=Result_agreement)) + scale_fill_brewer(palette="Set1") + labs(x="mcfDNA Identification of a Category 1 Microbe", y="Hospital Length of Stay (Days)") + theme_bw() + theme(axis.text.x = element_text(size=12, face="bold"), axis.title.x = element_text(size=14, face="bold"), axis.title.y =element_text(size=12), axis.text.y = element_text(size=14), legend.position ="none")
+p_no_outliers <- hosp_los + geom_signif(comparisons=list(c("Only Karius Positive Category 1", "SOC and Karius Concordant for Category 1")), map_signif_level = FALSE, tip_length = 0, y_position = 100, textsize = 5)
+
+icu_los <- ggplot(data = new_df_no_outliers, aes(x=Result_agreement, y=total_icu_los_days)) + geom_boxplot(aes(fill=Result_agreement)) + scale_fill_brewer(palette="Set1") + labs(x="mcfDNA Identification of a Category 1 Microbe", y="Total ICU Length of Stay (Days)") + theme_bw() + theme(axis.text.x = element_text(size=12, face="bold"), axis.title.x = element_text(size=14, face="bold"), axis.title.y =element_text(size=12), axis.text.y = element_text(size=14), legend.position ="none")
+p1_no_outliers <- icu_los + geom_signif(comparisons=list(c("Only Karius Positive Category 1", "SOC and Karius Concordant for Category 1")), map_signif_level = FALSE, tip_length = 0, y_position = 50, textsize = 5)
+p1_no_outliers
+
+
+p2 <- ggplot(new_df_no_outliers, aes(x=Result_agreement, fill=discharge_disposition_name)) + geom_bar(stat = 'count', position = 'fill')
+p2_no_outliers <- p2 + scale_fill_viridis_d() + theme_bw() + labs(fill= "Discharge Disposition Name", x="", y="Percentage", title="Discharge Disposition Name") + theme(axis.text.x=element_text(size=14), axis.title.y=element_text(size=14), legend.position = "bottom", legend.text = element_text(size=14), legend.title = element_text(size=14), plot.title=element_text(hjust=0.5)) 
+p2_no_outliers
+
+p3 <- ggplot(new_df_no_outliers, aes(x=Result_agreement, fill=discharge_group)) + geom_bar(stat = 'count', position = 'fill')
+p3_no_outliers <- p3 + scale_fill_viridis_d() + theme_bw() + labs(fill= "Discharge Disposition", x="", y="Percentage", title="Discharge Disposition") + theme(axis.text.x=element_text(size=14), axis.title.y=element_text(size=14), legend.position = "bottom", legend.text = element_text(size=14), legend.title = element_text(size=14), plot.title=element_text(hjust=0.5)) 
+p3_no_outliers
+
+ggarrange(p_no_outliers, p1_no_outliers, p2_no_outliers, p3_no_outliers, nrow=2, ncol=2)
+
+```
+
